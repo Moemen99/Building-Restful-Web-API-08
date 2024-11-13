@@ -364,3 +364,242 @@ public class PollsController : ControllerBase
 | Clear data flow | Need to update mapping when models change |
 
 This implementation demonstrates basic manual mapping between DTOs and domain models. While it requires more code than using a mapping library, it provides complete control over the mapping process and typically offers better performance. For more complex scenarios or larger applications, consider using mapping libraries like AutoMapper to reduce boilerplate code and maintenance overhead.
+
+
+# Implicit and Explicit Conversion Mapping in .NET Core
+
+## Table of Contents
+- [Project Structure](#project-structure)
+- [Implicit Conversion Mapping](#implicit-conversion-mapping)
+- [Explicit Conversion Mapping](#explicit-conversion-mapping)
+- [Comparison](#comparison)
+- [Implementation Examples](#implementation-examples)
+- [Best Practices](#best-practices)
+
+## Project Structure
+
+```
+YourApi/
+├── Contracts/
+│   ├── Requests/
+│   │   └── CreatePollRequest.cs
+│   └── Responses/
+│       └── PollResponse.cs
+└── Models/
+    └── Poll.cs
+```
+
+### Why This Structure?
+- Separates concerns by request/response types
+- Makes the API contract more organized
+- Easier to maintain and version
+- Better visibility of API surface area
+
+## Implicit Conversion Mapping
+
+Implicit conversion allows automatic type conversion without explicit casting. It's done using the `implicit operator` keyword.
+
+### Domain Model (Poll.cs)
+```csharp
+public class Poll
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
+    // Implicit conversion to PollResponse
+    public static implicit operator PollResponse(Poll poll)
+    {
+        return new()
+        {
+            Id = poll.Id,
+            Title = poll.Title,
+            Description = poll.Description
+        };
+    }
+}
+```
+
+### Request DTO (CreatePollRequest.cs)
+```csharp
+public class CreatePollRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
+    // Implicit conversion to Poll
+    public static implicit operator Poll(CreatePollRequest request)
+    {
+        return new()
+        {
+            Title = request.Title,
+            Description = request.Description
+        };
+    }
+}
+```
+
+### Controller Usage with Implicit Conversion
+```csharp
+public class PollsController : ControllerBase
+{
+    [HttpGet("{id}")]
+    public IActionResult Get([FromRoute] int id)
+    {
+        var poll = _pollService.Get(id);
+        if (poll is null)
+            return NotFound();
+            
+        PollResponse response = poll; // Implicit conversion
+        return Ok(response);
+    }
+
+    [HttpPost]
+    public IActionResult Add([FromBody] CreatePollRequest request)
+    {
+        var newPoll = _pollService.Add(request); // Implicit conversion
+        return CreatedAtAction(
+            nameof(Get), 
+            new { id = newPoll.Id }, 
+            newPoll);
+    }
+}
+```
+
+## Explicit Conversion Mapping
+
+Explicit conversion requires casting and makes the conversion more visible in the code. It uses the `explicit operator` keyword.
+
+### Domain Model (Poll.cs)
+```csharp
+public class Poll
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
+    // Explicit conversion to PollResponse
+    public static explicit operator PollResponse(Poll poll)
+    {
+        return new()
+        {
+            Id = poll.Id,
+            Title = poll.Title,
+            Description = poll.Description
+        };
+    }
+}
+```
+
+### Request DTO (CreatePollRequest.cs)
+```csharp
+public class CreatePollRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
+    // Explicit conversion to Poll
+    public static explicit operator Poll(CreatePollRequest request)
+    {
+        return new()
+        {
+            Title = request.Title,
+            Description = request.Description
+        };
+    }
+}
+```
+
+### Controller Usage with Explicit Conversion
+```csharp
+public class PollsController : ControllerBase
+{
+    [HttpGet("{id}")]
+    public IActionResult Get([FromRoute] int id)
+    {
+        var poll = _pollService.Get(id);
+        if (poll is null)
+            return NotFound();
+            
+        var response = (PollResponse)poll; // Explicit conversion
+        return Ok(response);
+    }
+
+    [HttpPost]
+    public IActionResult Add([FromBody] CreatePollRequest request)
+    {
+        var newPoll = _pollService.Add((Poll)request); // Explicit conversion
+        return CreatedAtAction(
+            nameof(Get), 
+            new { id = newPoll.Id }, 
+            newPoll);
+    }
+
+    [HttpPut("{id}")]
+    public IActionResult Update(
+        [FromRoute] int id, 
+        [FromBody] CreatePollRequest request)
+    {
+        var isUpdated = _pollService.Update(id, (Poll)request);
+        return !isUpdated ? NotFound() : NoContent();
+    }
+}
+```
+
+## Comparison
+
+| Feature | Implicit Conversion | Explicit Conversion |
+|---------|-------------------|-------------------|
+| Syntax | No casting required | Requires explicit casting |
+| Readability | Less obvious | More obvious |
+| Code Clarity | Can be ambiguous | Clear intent |
+| Debugging | Harder to track | Easier to track |
+| Performance | Same | Same |
+
+## Best Practices
+
+1. **Choose Explicit Over Implicit**
+   - Makes code more readable
+   - Clear indication of type conversion
+   - Easier to debug and maintain
+   - Reduces potential confusion
+
+2. **Conversion Location**
+   - Place conversion operators in source types
+   - Keep conversions simple and straightforward
+   - Avoid complex logic in conversion operators
+
+3. **Error Handling**
+   - Add null checks in conversion operators
+   - Consider throwing exceptions for invalid conversions
+   - Document any assumptions or requirements
+
+4. **Documentation**
+   - Comment conversion operators
+   - Explain any non-obvious mapping logic
+   - Document performance implications
+
+5. **Consider Alternatives**
+   - Use mapping libraries for complex scenarios
+   - Consider manual mapping methods for clarity
+   - Think about maintenance requirements
+
+```csharp
+// Example with error handling and documentation
+public static explicit operator Poll(CreatePollRequest request)
+{
+    if (request is null)
+        throw new ArgumentNullException(nameof(request));
+
+    if (string.IsNullOrWhiteSpace(request.Title))
+        throw new ArgumentException("Title is required", nameof(request));
+
+    return new()
+    {
+        Title = request.Title.Trim(),
+        Description = request.Description?.Trim() ?? string.Empty
+    };
+}
+```
+
+While both implicit and explicit conversion operators provide ways to perform mapping, explicit conversion is generally preferred for its clarity and maintainability. However, for complex mapping scenarios or large applications, consider using dedicated mapping libraries like AutoMapper or Mapster for more robust solutions.
