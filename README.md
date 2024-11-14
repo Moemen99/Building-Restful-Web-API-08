@@ -800,3 +800,184 @@ var app = builder.Build();
    - Consider bulk mapping for collections
 
 Using Mapster with records in .NET 8 provides a clean, efficient way to handle object mapping while maintaining immutability and type safety. The choice between records and classes often depends on your specific needs, but records are generally recommended for DTOs due to their immutable nature and concise syntax.
+
+
+
+# Global Configuration with Mapster in .NET Core
+
+## Table of Contents
+- [Project Structure](#project-structure)
+- [Setting Up Global Configuration](#setting-up-global-configuration)
+- [Configuration Implementation](#configuration-implementation)
+- [Program.cs Setup](#programcs-setup)
+- [Controller Implementation](#controller-implementation)
+- [Best Practices](#best-practices)
+
+## Project Structure
+
+```
+YourApi/
+├── Mapping/
+│   └── MappingConfig.cs
+├── Controllers/
+│   └── PollsController.cs
+└── Program.cs
+```
+
+## Setting Up Global Configuration
+
+### Mapping Configuration Class
+```csharp
+using Mapster;
+
+namespace YourApi.Mapping
+{
+    public class MappingConfig : IRegister
+    {
+        public void Register(TypeAdapterConfig config)
+        {
+            // Configure Poll to PollResponse mapping
+            config.NewConfig<Poll, PollResponse>()
+                .Map(dest => dest.Notes, src => src.Description);
+
+            // Add additional mappings as needed
+            config.NewConfig<CreatePollRequest, Poll>()
+                .Map(dest => dest.Description, src => src.Description);
+        }
+    }
+}
+```
+
+### Program.cs Configuration
+```csharp
+// Add Mapster with global configuration
+var mappingConfig = TypeAdapterConfig.GlobalSettings;
+mappingConfig.Scan(Assembly.GetExecutingAssembly());
+
+// Register Mapster as a service
+builder.Services.AddSingleton<IMapper>(new Mapper(mappingConfig));
+```
+
+## Controller Implementation
+
+### Clean Controller with Global Configuration
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class PollsController : ControllerBase
+{
+    private readonly IPollService _pollService;
+    private readonly IMapper _mapper;
+
+    public PollsController(IPollService pollService, IMapper mapper)
+    {
+        _pollService = pollService;
+        _mapper = mapper;
+    }
+
+    [HttpGet("{id}")]
+    public IActionResult Get([FromRoute] int id)
+    {
+        var poll = _pollService.Get(id);
+        if (poll is null)
+            return NotFound();
+
+        // Uses global configuration automatically
+        var response = poll.Adapt<PollResponse>();
+        return Ok(response);
+    }
+}
+```
+
+## Best Practices
+
+1. **Centralized Configuration**
+   ```csharp
+   public class MappingConfig : IRegister
+   {
+       public void Register(TypeAdapterConfig config)
+       {
+           // Group related mappings
+           RegisterPollMappings(config);
+           RegisterUserMappings(config);
+       }
+
+       private void RegisterPollMappings(TypeAdapterConfig config)
+       {
+           config.NewConfig<Poll, PollResponse>()
+               .Map(dest => dest.Notes, src => src.Description)
+               .TwoWays();  // Enable reverse mapping if needed
+       }
+
+       private void RegisterUserMappings(TypeAdapterConfig config)
+       {
+           // Add user-related mappings
+       }
+   }
+   ```
+
+2. **Validation in Mappings**
+   ```csharp
+   config.NewConfig<CreatePollRequest, Poll>()
+       .Map(dest => dest.Description, src => src.Description)
+       .AfterMapping((src, dest) =>
+       {
+           if (string.IsNullOrEmpty(dest.Title))
+               throw new ArgumentException("Title cannot be empty");
+       });
+   ```
+
+3. **Complex Mappings**
+   ```csharp
+   config.NewConfig<Poll, PollResponse>()
+       .Map(dest => dest.Notes, src => src.Description)
+       .Map(dest => dest.FormattedDate, 
+           src => src.CreatedDate.ToString("yyyy-MM-dd"))
+       .Ignore(dest => dest.ComputedProperty);
+   ```
+
+4. **Multiple Assembly Support**
+   ```csharp
+   // Program.cs
+   var assemblies = new[]
+   {
+       Assembly.GetExecutingAssembly(),
+       typeof(SharedMapping).Assembly,
+       // Add other assemblies as needed
+   };
+   
+   mappingConfig.Scan(assemblies);
+   ```
+
+5. **Conditional Mapping**
+   ```csharp
+   config.NewConfig<Poll, PollResponse>()
+       .Map(dest => dest.Notes, src => 
+           string.IsNullOrEmpty(src.Description) 
+               ? "No description available" 
+               : src.Description);
+   ```
+
+## Benefits of Global Configuration
+
+1. **Centralized Management**
+   - All mapping rules in one place
+   - Easier to maintain and update
+   - Better visibility of mapping rules
+
+2. **Reusability**
+   - Mappings can be reused across the application
+   - Consistent mapping behavior
+   - Reduced code duplication
+
+3. **Performance**
+   - Mappings are compiled once at startup
+   - Better runtime performance
+   - Reduced memory allocation
+
+4. **Maintainability**
+   - Clear separation of concerns
+   - Easy to modify mapping rules
+   - Better testing capabilities
+
+Using global configuration with Mapster provides a clean, maintainable way to handle object mapping across your application. By implementing `IRegister` and centralizing your mapping configurations, you create a more maintainable and scalable application architecture.
