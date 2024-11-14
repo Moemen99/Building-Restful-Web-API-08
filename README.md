@@ -603,3 +603,200 @@ public static explicit operator Poll(CreatePollRequest request)
 ```
 
 While both implicit and explicit conversion operators provide ways to perform mapping, explicit conversion is generally preferred for its clarity and maintainability. However, for complex mapping scenarios or large applications, consider using dedicated mapping libraries like AutoMapper or Mapster for more robust solutions.
+
+# Using Mapster for Object Mapping in .NET Core 8
+
+## Table of Contents
+- [Setup and Installation](#setup-and-installation)
+- [DTO Implementations](#dto-implementations)
+- [Controller Implementation](#controller-implementation)
+- [Mapping Configuration](#mapping-configuration)
+- [Dependency Injection](#dependency-injection)
+
+## Setup and Installation
+
+Install the required NuGet packages:
+```xml
+<ItemGroup>
+    <PackageReference Include="Mapster" Version="7.4.0" />
+    <PackageReference Include="Mapster.DependencyInjection" Version="1.0.1" />
+</ItemGroup>
+```
+
+## DTO Implementations
+
+### Using Records (Recommended for .NET 8+)
+```csharp
+// Contracts/Requests/CreatePollRequest.cs
+public record CreatePollRequest(
+    string Title, 
+    string Description);
+
+// Contracts/Responses/PollResponse.cs
+public record PollResponse(
+    int Id,
+    string Title, 
+    string Notes);  // Different property name from domain model
+```
+
+### Using Classes (Traditional Approach)
+```csharp
+// Contracts/Requests/CreatePollRequest.cs
+public class CreatePollRequest
+{
+    public string Title { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+}
+
+// Contracts/Responses/PollResponse.cs
+public class PollResponse
+{
+    public int Id { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string Notes { get; init; } = string.Empty;  // Different property name from domain model
+}
+
+// Domain Model
+public class Poll
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+}
+```
+
+## Controller Implementation
+
+### Using Direct Adapt
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class PollsController : ControllerBase
+{
+    private readonly IPollService _pollService;
+
+    public PollsController(IPollService pollService)
+    {
+        _pollService = pollService;
+    }
+
+    [HttpGet("{id}")]
+    public IActionResult Get([FromRoute] int id)
+    {
+        var poll = _pollService.Get(id);
+        if (poll is null)
+            return NotFound();
+
+        // Inline configuration for property mapping
+        var config = new TypeAdapterConfig();
+        config.NewConfig<Poll, PollResponse>()
+            .Map(dest => dest.Notes, src => src.Description);
+
+        var response = poll.Adapt<PollResponse>(config);
+        return Ok(response);
+    }
+}
+```
+
+### Using IMapper Interface
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class PollsController : ControllerBase
+{
+    private readonly IPollService _pollService;
+    private readonly IMapper _mapper;
+
+    public PollsController(IPollService pollService, IMapper mapper)
+    {
+        _pollService = pollService;
+        _mapper = mapper;
+    }
+
+    [HttpGet("{id}")]
+    public IActionResult Get([FromRoute] int id)
+    {
+        var poll = _pollService.Get(id);
+        if (poll is null)
+            return NotFound();
+
+        var response = _mapper.Map<PollResponse>(poll);
+        return Ok(response);
+    }
+}
+```
+
+## Mapping Configuration
+
+### Global Configuration Setup
+Create a new class for mapping configuration:
+
+```csharp
+public class MappingConfig
+{
+    public static void Configure()
+    {
+        TypeAdapterConfig.GlobalSettings.NewConfig<Poll, PollResponse>()
+            .Map(dest => dest.Notes, src => src.Description);
+
+        TypeAdapterConfig.GlobalSettings.NewConfig<CreatePollRequest, Poll>()
+            .Map(dest => dest.Description, src => src.Description)
+            .Map(dest => dest.Title, src => src.Title);
+    }
+}
+```
+
+## Dependency Injection
+
+In Program.cs:
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Mapster scanning
+builder.Services.AddMapster();
+
+// Configure global mappings
+MappingConfig.Configure();
+
+var app = builder.Build();
+```
+
+## Best Practices
+
+1. **Use Records for DTOs**
+   - Immutable by default
+   - More concise syntax
+   - Better for data transfer scenarios
+   - Primary constructors in .NET 8
+
+2. **Global Configuration**
+   - Keep mapping configurations in one place
+   - Easier to maintain and modify
+   - Better visibility of mapping rules
+
+3. **Property Naming**
+   ```csharp
+   TypeAdapterConfig.GlobalSettings.NewConfig<Poll, PollResponse>()
+       .Map(dest => dest.Notes, src => src.Description)
+       .IgnoreNonMapped(true);  // Ignore properties that aren't explicitly mapped
+   ```
+
+4. **Validation**
+   ```csharp
+   TypeAdapterConfig.GlobalSettings.NewConfig<CreatePollRequest, Poll>()
+       .Map(dest => dest.Description, src => src.Description)
+       .MapToConstructor(true)  // Use constructor mapping for records
+       .ValidateMap((src, dest) => 
+       {
+           if (string.IsNullOrEmpty(src.Title))
+               throw new ArgumentException("Title is required");
+           return true;
+       });
+   ```
+
+5. **Performance Considerations**
+   - Mapster is generally faster than AutoMapper
+   - Use compiled mappings for better performance
+   - Consider bulk mapping for collections
+
+Using Mapster with records in .NET 8 provides a clean, efficient way to handle object mapping while maintaining immutability and type safety. The choice between records and classes often depends on your specific needs, but records are generally recommended for DTOs due to their immutable nature and concise syntax.
